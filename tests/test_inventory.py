@@ -54,7 +54,7 @@ class InventoryTests(unittest.TestCase):
         self.dest = self.base / '保存'
 
     def assert_consistent(self, r):
-        m = json.loads(r.manifest_path.read_text())
+        m = json.loads(r.manifest_path.read_text(encoding='utf-8'))
         self.assertEqual(m['confirmed_rows'], sum(p['data_rows'] for p in m['csv_parts'] if p['finalized']))
         self.assertEqual(m['processed_rows'], sum(m['counts'][k] for k in ['files', 'folders', 'links', 'unknown']))
         for part in m['csv_parts']:
@@ -120,7 +120,7 @@ class InventoryTests(unittest.TestCase):
         rows = {x[1]: x for x in read_rows(r)}
         self.assertEqual(rows['denied'][-1], 'フォルダ列挙失敗')
         self.assertEqual(rows['gone'][5], '')
-        scopes = [json.loads(x) for x in (r.directory / m['scope_file']).read_text().splitlines()]
+        scopes = [json.loads(x) for x in (r.directory / m['scope_file']).read_text(encoding='utf-8').splitlines()]
         self.assertEqual({s['reason'] for s in scopes}, {'permission_denied', 'not_found'})
 
     def test_cancellation_marks_current_and_pending(self):
@@ -136,7 +136,7 @@ class InventoryTests(unittest.TestCase):
         self.assertEqual(m['run_status'], 'interrupted')
         self.assertTrue(m['artifacts_finalized'])
         self.assertEqual(m['confirmed_rows'], 1)
-        scopes = [json.loads(x) for x in (r.directory / m['scope_file']).read_text().splitlines()]
+        scopes = [json.loads(x) for x in (r.directory / m['scope_file']).read_text(encoding='utf-8').splitlines()]
         self.assertEqual({s['kind'] for s in scopes}, {'interrupted', 'pending'})
 
     def test_empty_input_and_missing_root(self):
@@ -177,7 +177,7 @@ class InventoryTests(unittest.TestCase):
         with patch.object(Path, 'write_text', write):
             r = inv.scan(self.root, self.dest)
         self.assertEqual(r.manifest['run_status'], 'abnormal')
-        self.assertEqual(json.loads(r.manifest_path.read_text())['run_status'], 'abnormal')
+        self.assertEqual(json.loads(r.manifest_path.read_text(encoding='utf-8'))['run_status'], 'abnormal')
 
     def test_atomic_manifest_failure_keeps_previous_json(self):
         path = self.base / 'm.json'
@@ -185,7 +185,7 @@ class InventoryTests(unittest.TestCase):
         with patch.object(inv.os, 'replace', side_effect=OSError('replace failed')):
             with self.assertRaises(OSError):
                 inv.atomic_json(path, {'state': 'completed'})
-        self.assertEqual(json.loads(path.read_text()), {'state': 'running'})
+        self.assertEqual(json.loads(path.read_text(encoding='utf-8')), {'state': 'running'})
 
     def test_split_100001_and_all_limits_same_records(self):
         signatures = []
