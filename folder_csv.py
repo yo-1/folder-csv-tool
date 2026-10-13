@@ -104,9 +104,9 @@ def gui():
     import tkinter as tk
     from tkinter import ttk, filedialog, messagebox
     app = tk.Tk()
-    app.title('フォルダ・ファイル一覧CSV作成ツール v1.1')
-    app.geometry('840x310')
-    app.minsize(640, 310)
+    app.title('フォルダ・ファイル一覧CSV作成ツール v1.2')
+    app.geometry('840x370')
+    app.minsize(640, 370)
     frame = ttk.Frame(app, padding=18)
     frame.pack(fill='both', expand=True)
     frame.columnconfigure(0, weight=1)
@@ -130,17 +130,18 @@ def gui():
     bar.grid(row=5, column=0, columnspan=2, sticky='ew')
     events = queue.Queue()
     busy = False
+    saved_output = None
 
     def worker(root, output):
         try:
             result = export_inventory(root, output,
                                       lambda count, path: events.put(('progress', (count, path))))
-            events.put(('done', result))
+            events.put(('done', (result, output)))
         except Exception as exc:
             events.put(('error', str(exc)))
 
     def start():
-        nonlocal busy
+        nonlocal busy, saved_output
         root = clean_path(source.get())
         if not root:
             messagebox.showwarning('対象未入力', '対象フォルダのパスを入力してください。')
@@ -154,6 +155,8 @@ def gui():
             return
         # Do not perform NAS access on the UI thread.
         busy = True
+        saved_output = None
+        open_button.configure(state='disabled')
         for widget in (entry, browse_button, run_button):
             widget.configure(state='disabled')
         status.set('一覧取得中… 大きなNASでは時間がかかります。')
@@ -164,7 +167,7 @@ def gui():
     run_button.grid(row=3, column=0, sticky='w', pady=(16, 0))
 
     def poll():
-        nonlocal busy
+        nonlocal busy, saved_output
         latest = None
         while True:
             try:
@@ -183,9 +186,11 @@ def gui():
                 status.set('作成に失敗しました。途中のCSVが残る場合があります。')
                 messagebox.showerror('作成失敗', value)
             else:
-                counts, summary = value
+                (counts, summary), saved_output = value
+                open_button.configure(state='normal')
                 incomplete = counts['errors'] > 0 or counts['links'] > 0
-                status.set('保存完了（取得エラー／省略あり）' if incomplete else '保存完了')
+                status.set(('保存完了（取得エラー／省略あり）' if incomplete else '保存完了')
+                           + '\n保存先：' + str(Path(saved_output).parent))
                 show = messagebox.showwarning if incomplete else messagebox.showinfo
                 show('結果', summary + ('\n取得エラーは同名の .errors.csv を確認してください。' if counts['errors'] else ''))
         if latest:
@@ -198,6 +203,21 @@ def gui():
             messagebox.showinfo('処理中', '処理終了後に閉じてください。')
         else:
             app.destroy()
+
+    def open_output_folder():
+        if saved_output is None:
+            return
+        try:
+            os.startfile(str(Path(saved_output).parent))
+        except OSError as exc:
+            messagebox.showerror('フォルダを開けません', str(exc))
+
+    actions = ttk.Frame(frame)
+    actions.grid(row=6, column=0, columnspan=2, sticky='e', pady=(14, 0))
+    open_button = ttk.Button(actions, text='保存フォルダを開く',
+                             state='disabled', command=open_output_folder)
+    open_button.pack(side='left', padx=(0, 8))
+    ttk.Button(actions, text='終了', command=close).pack(side='left')
 
     app.protocol('WM_DELETE_WINDOW', close)
     entry.focus_set()
