@@ -1,4 +1,9 @@
 __pycache__/
 *.py[cod]
 *.csv
+*.csv.part
 *.summary.txt
+*.manifest.json
+*.manifest.json.tmp
+*.scopes.jsonl
+*.sqlite*

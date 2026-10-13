@@ -1,0 +1,39 @@
+{
+  "schema_version": "1.0",
+  "csv_columns": [
+    "種別",
+    "名前",
+    "相対パス",
+    "フルパス",
+    "拡張子",
+    "サイズ_バイト",
+    "更新日時",
+    "表示分類",
+    "状態"
+  ],
+  "row_states": {
+    "取得済み": "当該項目の情報取得済み。配下の完全性は管理JSONと範囲記録で確認する。",
+    "取得エラー": "当該項目の情報取得失敗。サイズ空欄は0ではない。",
+    "フォルダ列挙失敗": "フォルダの情報は取得できたが配下列挙は失敗・不完全。",
+    "配下未走査": "フォルダ列挙を中断。配下の完全性は未確認。",
+    "リンク先の再帰走査は省略": "リンク項目のみ取得。参照先を意図的に未走査。"
+  },
+  "run_statuses": {
+    "running": "取得中",
+    "completed": "正常完了",
+    "partial_failure": "一部取得失敗",
+    "interrupted": "中断",
+    "abnormal": "異常終了",
+    "not_started": "未開始"
+  },
+  "scope_kinds": [
+    "failed",
+    "interrupted",
+    "pending",
+    "link_skipped"
+  ],
+  "unknown_state_policy": "unconfirmed; never normal",
+  "root_row_included": false,
+  "counts_equation": "processed_rows = files + folders + links + unknown",
+  "confirmed_rows_equation": "sum(csv_parts.data_rows where finalized=true)"
+}
