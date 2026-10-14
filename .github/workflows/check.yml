@@ -14,3 +14,8 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: python -m unittest discover -s tests -v
+      - name: Windows startup check
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          .\launch.ps1 -CheckOnly -PythonPath "$env:pythonLocation\python.exe"

@@ -1,6 +1,6 @@
 # フォルダ・ファイル一覧CSV作成ツール
 
-Folder CSV Tool v1.3.0 ― 先行改修A・実機確認前
+Folder CSV Tool v1.3.1 ― 先行改修A・実機確認前
 
 指定フォルダ内の全階層の一覧を取得し、分割CSVと管理JSONに保存するWindows用Pythonツールです。ローカルフォルダと、アクセス権のあるNASのUNCパスに対応します。元データの修復・変換・削除や、内部品質検査は行いません。
 
@@ -21,7 +21,7 @@ Folder CSV Tool v1.3.0 ― 先行改修A・実機確認前
 py -3 folder_csv.py --root "C:\GIS\Data" --output-dir "C:\Work\Inventory" --rows-per-csv 100000
 ```
 
-`--rows-per-csv` は10000／50000／100000／0（分割なし）。v1.2の `--output`（単一CSV指定）は、v1.3.0では `--output-dir`（成果物セットの保存先）に変更しました。
+`--rows-per-csv` は10000／50000／100000／0（分割なし）。v1.2の `--output`（単一CSV指定）は、v1.3.1では `--output-dir`（成果物セットの保存先）に変更しました。
 
 ## 出力
 
@@ -104,3 +104,11 @@ Windowsの実画面・実NASでの改修版の確認は未実施です。v1.2で
 ## ライセンス
 
 AGPL-3.0-only。全文は `LICENSE` を参照してください。
+
+## 起動できない場合
+
+start.batはlaunch.ps1を使い、登録済みPythonを順に確認します。tkinterのimportとTcl/Tkの画面初期化を確認し、利用できるPythonで起動します。自動インストールはしません。
+
+見つからない場合は、表示されたstartup診断ログを添付してください。Python未導入・未検出とtkinter/Tcl-Tkのエラーを区別します。ログはLocalAppData/FolderCSVToolへ保存します。Pythonを指定する場合はツールと同じフォルダにpython_path.txtを作り、python.exeのフルパスを1行で記載します。QGIS付属Pythonにはtkinterがない場合があります。
+
+PowerShellのExecutionPolicy Bypassは起動プロセスだけに指定し、PCの恒久設定は変更しません。組織ポリシーで制限される場合はPythonからfolder_csv.pyを直接起動してください。

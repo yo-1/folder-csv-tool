@@ -13,7 +13,7 @@ import time
 import uuid
 from dataclasses import dataclass
 
-VERSION = '1.3.0'
+VERSION = '1.3.1'
 SCHEMA_VERSION = '1.0'
 HEADERS = ['種別', '名前', '相対パス', 'フルパス', '拡張子', 'サイズ_バイト',
            '更新日時', '表示分類', '状態']

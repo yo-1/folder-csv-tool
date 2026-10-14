@@ -1,4 +1,4 @@
-フォルダ・ファイル一覧CSV作成ツール v1.3.0（先行改修A・実機確認前）
+フォルダ・ファイル一覧CSV作成ツール v1.3.1（先行改修A・実機確認前）
 
 Windows、Python 3（tkinter付き）が必要です。追加pipパッケージ不要。
 
@@ -29,3 +29,6 @@ py -3 folder_csv.py --root "C:\GIS\Data" --output-dir "C:\Work\Inventory" --rows
 詳細仕様：README.md、docs/inventory-contract.md、docs/status_spec.json
 試験記録：docs/validation.md
 ライセンス：AGPL-3.0-only。LICENSEを参照してください。
+
+起動できない場合：複数PythonとTcl/Tkを順に確認し、診断ログの保存先を表示します。
+python_path.txtにpython.exeのフルパスを1行で指定できます。
