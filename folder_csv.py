@@ -1,239 +1,210 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) 2026 Yoichi Wada
-"""Folder inventory: Python standard library only; GUI or command line."""
+"""GUI/CLI entry point for Folder CSV Tool."""
 import argparse
-import csv
-import datetime as dt
 import os
 from pathlib import Path
 import queue
-import stat
 import threading
+import time
 
-HEADERS = ['種別', '名前', '相対パス', 'フルパス', '拡張子', 'サイズ_バイト', '更新日時', '表示分類', '状態']
-
-
-def clean_path(value):
-    return value.strip().strip('"').strip()
-
-
-def export_inventory(root, output, progress=None):
-    root = Path(clean_path(str(root))).absolute()
-    output = Path(output).absolute()
-    if not root.is_dir():
-        raise ValueError('対象フォルダにアクセスできません：' + str(root))
-    # Keep all generated output outside the input tree.
-    try:
-        inside = os.path.commonpath([str(root.resolve()), str(output.resolve())]) == str(root.resolve())
-    except ValueError:  # UNC source and local destination can be on different drives.
-        inside = False
-    if inside:
-        raise ValueError('CSVの保存先は対象フォルダの外を選んでください。')
-    error_file = output.with_suffix('.errors.csv')
-    summary_file = output.with_suffix('.summary.txt')
-    counts = dict(files=0, folders=0, links=0, errors=0, rows=0)
-    # Exclusive creation prevents overwriting prior results.
-    with output.open('x', encoding='utf-8-sig', newline='') as stream:
-        writer = csv.writer(stream)
-        writer.writerow(HEADERS)
-        error_stream = None
-        error_writer = None
-
-        def error(path, exc):
-            nonlocal error_stream, error_writer
-            if error_stream is None:
-                error_stream = error_file.open('x', encoding='utf-8-sig', newline='')
-                error_writer = csv.writer(error_stream)
-                error_writer.writerow(['パス', 'エラー'])
-            error_writer.writerow([str(path), str(exc)])
-            counts['errors'] += 1
-
-        pending = [root]
-        try:
-            while pending:
-                folder = pending.pop()
-                if progress:
-                    progress(dict(counts), str(folder))
-                try:
-                    with os.scandir(folder) as entries:
-                        for entry in entries:
-                            path = Path(entry.path)
-                            relative = str(path.relative_to(root))
-                            try:
-                                info = entry.stat(follow_symlinks=False)
-                                is_link = entry.is_symlink() or bool(
-                                    getattr(info, 'st_file_attributes', 0) & 0x400)
-                                is_folder = stat.S_ISDIR(info.st_mode)
-                                if is_link:
-                                    kind, status = 'リンク', 'リンク先の再帰走査は省略'
-                                    counts['links'] += 1
-                                elif is_folder:
-                                    kind, status = 'フォルダ', '取得済み'
-                                    counts['folders'] += 1
-                                    pending.append(path)
-                                else:
-                                    kind, status = 'ファイル', '取得済み'
-                                    counts['files'] += 1
-                                writer.writerow([kind, entry.name, relative, str(path),
-                                                 path.suffix if kind == 'ファイル' else '',
-                                                 info.st_size if kind == 'ファイル' else '',
-                                                 dt.datetime.fromtimestamp(info.st_mtime).isoformat(timespec='seconds'),
-                                                 (path.suffix or '拡張子なし') if kind == 'ファイル' else kind,
-                                                 status])
-                            except OSError as exc:
-                                error(path, exc)
-                                writer.writerow(['不明', entry.name, relative, str(path), '', '', '', '不明', '取得エラー'])
-                            counts['rows'] += 1
-                            if progress and counts['rows'] % 500 == 0:
-                                progress(dict(counts), str(folder))
-                except OSError as exc:
-                    error(folder, exc)
-        finally:
-            if error_stream:
-                error_stream.close()
-    summary = (f"対象：{root}\nCSV：{output}\n"
-               f"ファイル：{counts['files']}\nフォルダ：{counts['folders']}\n"
-               f"リンク（再帰省略）：{counts['links']}\n取得エラー：{counts['errors']}\n"
-               f"終了日時：{dt.datetime.now().isoformat(timespec='seconds')}\n"
-               '走査中の変更は反映が一定ではありません。リンク先は走査していません。\n')
-    summary_file.write_text(summary, encoding='utf-8-sig')
-    return counts, summary
+from inventory import HEADERS, VERSION, scan
 
 
 def gui():
     import tkinter as tk
     from tkinter import ttk, filedialog, messagebox
     app = tk.Tk()
-    app.title('フォルダ・ファイル一覧CSV作成ツール v1.2')
-    app.geometry('840x370')
-    app.minsize(640, 370)
+    app.title('フォルダ・ファイル一覧CSV作成ツール v' + VERSION)
+    app.geometry('900x640')
+    app.minsize(740, 570)
     frame = ttk.Frame(app, padding=18)
     frame.pack(fill='both', expand=True)
     frame.columnconfigure(0, weight=1)
-    ttk.Label(frame, text='対象フォルダのパス（NASのパスも入力できます）').grid(row=0, column=0, sticky='w')
+    frame.rowconfigure(8, weight=1)
     source = tk.StringVar()
-    entry = ttk.Entry(frame, textvariable=source)
-    entry.grid(row=1, column=0, sticky='ew', pady=8)
-
-    def browse():
-        value = filedialog.askdirectory(title='一覧を作成するフォルダ')
-        if value:
-            source.set(value)
-
-    browse_button = ttk.Button(frame, text='参照…', command=browse)
-    browse_button.grid(row=1, column=1, padx=(8, 0))
-    ttk.Label(frame, text='全階層・隠し項目を含めて取得します。元データは変更しません。').grid(row=2, column=0, columnspan=2, sticky='w')
-    status = tk.StringVar(value='パスを入力して「CSV作成」を押してください。')
-    status_label = ttk.Label(frame, textvariable=status, wraplength=780)
-    status_label.grid(row=4, column=0, columnspan=2, sticky='w', pady=12)
-    bar = ttk.Progressbar(frame, mode='indeterminate')
-    bar.grid(row=5, column=0, columnspan=2, sticky='ew')
-    events = queue.Queue()
+    destination = tk.StringVar(value=str(Path.home() / 'Documents' / 'Folder_CSV_Output'))
+    split = tk.StringVar(value='10万行')
+    state = tk.StringVar(value='対象フォルダと保存先を指定してください。')
+    progress_text = tk.StringVar()
+    results = tk.StringVar()
+    events = queue.Queue(maxsize=2)
+    cancel = threading.Event()
     busy = False
-    saved_output = None
+    last_result = None
+    last_progress = None
+    began = 0.0
 
-    def worker(root, output):
+    def select(variable):
+        value = filedialog.askdirectory()
+        if value:
+            variable.set(value)
+
+    ttk.Label(frame, text='対象フォルダ（ローカル／NASのUNCパス）').grid(row=0, column=0, sticky='w')
+    source_entry = ttk.Entry(frame, textvariable=source)
+    source_entry.grid(row=1, column=0, sticky='ew', pady=5)
+    source_browse = ttk.Button(frame, text='参照…', command=lambda: select(source))
+    source_browse.grid(row=1, column=1, padx=8)
+    ttk.Label(frame, text='保存先（PCローカル側を推奨。取得IDごとにサブフォルダを作成）').grid(row=2, column=0, sticky='w', pady=(10, 0))
+    destination_entry = ttk.Entry(frame, textvariable=destination)
+    destination_entry.grid(row=3, column=0, sticky='ew', pady=5)
+    destination_browse = ttk.Button(frame, text='参照…', command=lambda: select(destination))
+    destination_browse.grid(row=3, column=1, padx=8)
+    options = ttk.Frame(frame)
+    options.grid(row=4, column=0, columnspan=2, sticky='w', pady=10)
+    ttk.Label(options, text='1CSVのデータ行数：').pack(side='left')
+    selector = ttk.Combobox(options, textvariable=split, values=['1万行', '5万行', '10万行', '分割なし'],
+                            state='readonly', width=12)
+    selector.pack(side='left')
+    ttk.Label(frame, textvariable=state, wraplength=840).grid(row=5, column=0, columnspan=2, sticky='w', pady=8)
+    ttk.Label(frame, textvariable=progress_text, wraplength=840).grid(row=6, column=0, columnspan=2, sticky='w')
+    bar = ttk.Progressbar(frame, mode='indeterminate')
+    bar.grid(row=7, column=0, columnspan=2, sticky='ew', pady=8)
+    ttk.Label(frame, textvariable=results, wraplength=840, justify='left').grid(row=8, column=0, columnspan=2, sticky='nw')
+    actions = ttk.Frame(frame)
+    actions.grid(row=9, column=0, columnspan=2, sticky='w', pady=12)
+    inputs = [source_entry, source_browse, destination_entry, destination_browse]
+
+    def send(event, value):
+        # Retain at most the latest two notifications. No unbounded UI log/queue.
         try:
-            result = export_inventory(root, output,
-                                      lambda count, path: events.put(('progress', (count, path))))
-            events.put(('done', (result, output)))
+            events.put_nowait((event, value))
+        except queue.Full:
+            try:
+                events.get_nowait()
+            except queue.Empty:
+                pass
+            events.put_nowait((event, value))
+
+    def worker(root, target, limit):
+        try:
+            result = scan(root, target, limit, cancel=cancel,
+                          progress=lambda value: send('progress', value))
+            send('done', result)
         except Exception as exc:
-            events.put(('error', str(exc)))
+            send('error', str(exc))
 
     def start():
-        nonlocal busy, saved_output
-        root = clean_path(source.get())
-        if not root:
-            messagebox.showwarning('対象未入力', '対象フォルダのパスを入力してください。')
+        nonlocal busy, last_result, last_progress, began
+        root = source.get().strip().strip('"').strip()
+        target = destination.get().strip().strip('"').strip()
+        if not root or not target:
+            messagebox.showwarning('入力不足', '対象フォルダと保存先を指定してください。')
             return
-        name = root.rstrip('\\/').replace('\\', '/').split('/')[-1]
-        output = filedialog.asksaveasfilename(
-            title='CSVの保存先（対象フォルダの外を選択）',
-            initialfile=f'{name}_全リスト_{dt.datetime.now():%Y%m%d_%H%M%S}.csv',
-            defaultextension='.csv', filetypes=[('CSV', '*.csv')])
-        if not output:
-            return
-        # Do not perform NAS access on the UI thread.
         busy = True
-        saved_output = None
-        open_button.configure(state='disabled')
-        for widget in (entry, browse_button, run_button):
+        last_result = last_progress = None
+        began = time.monotonic()
+        cancel.clear()
+        for widget in inputs:
             widget.configure(state='disabled')
-        status.set('一覧取得中… 大きなNASでは時間がかかります。')
+        selector.configure(state='disabled')
+        start_button.configure(state='disabled')
+        cancel_button.configure(state='normal')
+        folder_button.configure(state='disabled')
+        summary_button.configure(state='disabled')
+        results.set('')
+        state.set('取得中。全件数は事前に数えず、取得件数を表示します。')
         bar.start(15)
-        threading.Thread(target=worker, args=(root, output), daemon=True).start()
+        limit = {'1万行': 10000, '5万行': 50000, '10万行': 100000, '分割なし': 0}[split.get()]
+        threading.Thread(target=worker, args=(root, target, limit), daemon=True).start()
 
-    run_button = ttk.Button(frame, text='CSV作成', command=start)
-    run_button.grid(row=3, column=0, sticky='w', pady=(16, 0))
+    def stop():
+        cancel.set()
+        cancel_button.configure(state='disabled')
+        state.set('中断要求済み。現在のOSアクセスが戻り次第、取得済み結果を保存します。')
+
+    def open_path(summary=False):
+        if last_result is None:
+            return
+        path = last_result.summary_path if summary else last_result.directory
+        try:
+            os.startfile(str(path))
+        except OSError as exc:
+            messagebox.showerror('開けません', str(exc))
+
+    def close():
+        if busy:
+            messagebox.showinfo('取得中', '「中断」を押し、結果保存が終わってから終了してください。\n'
+                                'NASのOS通信待ちは、今回の版では即時停止できません。')
+        else:
+            app.destroy()
+
+    start_button = ttk.Button(actions, text='一覧を取得', command=start)
+    start_button.pack(side='left', padx=(0, 8))
+    cancel_button = ttk.Button(actions, text='中断', command=stop, state='disabled')
+    cancel_button.pack(side='left', padx=(0, 8))
+    folder_button = ttk.Button(actions, text='保存フォルダーを開く', command=open_path, state='disabled')
+    folder_button.pack(side='left', padx=(0, 8))
+    summary_button = ttk.Button(actions, text='終了概要を開く', command=lambda: open_path(True), state='disabled')
+    summary_button.pack(side='left', padx=(0, 8))
+    ttk.Button(actions, text='終了', command=close).pack(side='left')
 
     def poll():
-        nonlocal busy, saved_output
-        latest = None
-        while True:
+        nonlocal busy, last_result, last_progress
+        for _ in range(2):
             try:
                 event, value = events.get_nowait()
             except queue.Empty:
                 break
             if event == 'progress':
-                latest = value
+                last_progress = value
                 continue
-            latest = None
             busy = False
             bar.stop()
-            for widget in (entry, browse_button, run_button):
+            cancel_button.configure(state='disabled')
+            for widget in inputs:
                 widget.configure(state='normal')
+            selector.configure(state='readonly')
+            start_button.configure(state='normal', text='新しい一覧を取得')
             if event == 'error':
-                status.set('作成に失敗しました。途中のCSVが残る場合があります。')
-                messagebox.showerror('作成失敗', value)
-            else:
-                (counts, summary), saved_output = value
-                open_button.configure(state='normal')
-                incomplete = counts['errors'] > 0 or counts['links'] > 0
-                status.set(('保存完了（取得エラー／省略あり）' if incomplete else '保存完了')
-                           + '\n保存先：' + str(Path(saved_output).parent))
-                show = messagebox.showwarning if incomplete else messagebox.showinfo
-                show('結果', summary + ('\n取得エラーは同名の .errors.csv を確認してください。' if counts['errors'] else ''))
-        if latest:
-            count, path = latest
-            status.set(f"取得中：{count['rows']:,}件／エラー {count['errors']}件\n{path}")
-        app.after(150, poll)
-
-    def close():
+                state.set('未開始／保存先準備失敗。完了していません。')
+                results.set(value)
+                continue
+            last_result = value
+            m = value.manifest
+            c = m['counts']
+            state.set(m['status_label'] + ('（リンク先省略あり）' if c['links'] else ''))
+            results.set(f"開始：{m['started_at']}\n終了：{m['ended_at']}\n"
+                        f"経過：{m['elapsed_seconds']:.1f}秒\n"
+                        f"ファイル {c['files']:,}／フォルダ {c['folders']:,}／リンク {c['links']:,}／不明 {c['unknown']:,}\n"
+                        f"取得エラー {c['errors']:,}／取得済み分の合計容量 {c['bytes']:,}バイト\n"
+                        f"処理済み {m['processed_rows']:,}行／確定CSV {m['confirmed_rows']:,}行\n"
+                        f"保存先：{value.directory}\n管理JSON：{value.manifest_path.name}\n"
+                        f"出力CSV：{len(m['csv_parts'])}本（一覧は終了概要・管理JSON）"
+                        + ('\n保存失敗：' + str(m['fatal_error']) if m['fatal_error'] else ''))
+            folder_button.configure(state='normal')
+            summary_button.configure(state='normal' if value.summary_path.is_file() else 'disabled')
         if busy:
-            messagebox.showinfo('処理中', '処理終了後に閉じてください。')
-        else:
-            app.destroy()
-
-    def open_output_folder():
-        if saved_output is None:
-            return
-        try:
-            os.startfile(str(Path(saved_output).parent))
-        except OSError as exc:
-            messagebox.showerror('フォルダを開けません', str(exc))
-
-    actions = ttk.Frame(frame)
-    actions.grid(row=6, column=0, columnspan=2, sticky='e', pady=(14, 0))
-    open_button = ttk.Button(actions, text='保存フォルダを開く',
-                             state='disabled', command=open_output_folder)
-    open_button.pack(side='left', padx=(0, 8))
-    ttk.Button(actions, text='終了', command=close).pack(side='left')
+            elapsed = time.monotonic() - began
+            heartbeat = last_progress['heartbeat_monotonic'] if last_progress else began
+            waiting = time.monotonic() - heartbeat
+            row = last_progress['processed_rows'] if last_progress else 0
+            confirmed = last_progress['confirmed_rows'] if last_progress else 0
+            path = last_progress['current_path'] if last_progress else source.get()
+            stamp = last_progress['last_response_at'] if last_progress else '未受信'
+            progress_text.set(f"処理済み {row:,}行／確定CSV {confirmed:,}行／経過 {elapsed:.1f}秒\n"
+                              f"最終応答：{stamp}\n対象：{path}"
+                              + (f'\n応答待ち／進捗通知なし {waiting:.0f}秒（通信停止とは未確定）' if waiting >= 15 else ''))
+        app.after(200, poll)
 
     app.protocol('WM_DELETE_WINDOW', close)
-    entry.focus_set()
+    source_entry.focus_set()
     poll()
     app.mainloop()
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='全サブフォルダ・ファイル一覧をUTF-8 BOM付きCSVに保存')
+    parser = argparse.ArgumentParser(description='全階層一覧を分割CSVと管理JSONに保存')
     parser.add_argument('--root')
-    parser.add_argument('--output')
+    parser.add_argument('--output-dir')
+    parser.add_argument('--rows-per-csv', type=int, choices=[0, 10000, 50000, 100000], default=100000)
     args = parser.parse_args()
-    if args.root or args.output:
-        if not (args.root and args.output):
-            parser.error('--root と --output を両方指定してください。')
-        counts, summary = export_inventory(args.root, args.output)
-        print(summary)
-        raise SystemExit(2 if counts['errors'] or counts['links'] else 0)
+    if args.root or args.output_dir:
+        if not args.root or not args.output_dir:
+            parser.error('--root と --output-dir を両方指定してください。')
+        result = scan(args.root, args.output_dir, args.rows_per_csv)
+        print(result.manifest['status_label'])
+        print(result.manifest_path)
+        raise SystemExit({'completed': 0, 'partial_failure': 2, 'interrupted': 130,
+                          'not_started': 2, 'abnormal': 1}.get(result.manifest['run_status'], 1))
     gui()
